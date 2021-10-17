@@ -1,5 +1,9 @@
 import tensorflow as tf
 from tensorflow.keras import layers as tfl
+from tensorflow.keras import Input, Model
+from tensorflow.keras.layers import Lambda
+from tensorflow.python.ops.gen_random_ops import TruncatedNormal
+from models_V2.utils import box_nms, spatial_nms
 
 
 def vgg_block(filters, kernel_size, name, data_format, training=False,
@@ -56,7 +60,7 @@ def vgg_backbone(inputs, **config):
     return x
 
 
-def detector_head(input, **config):
+def detector_head(inputs, input, **config):
     params_conv = {'padding': 'SAME', 'data_format': config['data_format'],
                    'batch_normalization': True,
                    'training': config['training'],
@@ -83,4 +87,21 @@ def detector_head(input, **config):
             input=prob, block_size=config['grid_size'], data_format='NCHW' if cfirst else 'NHWC')
     prob = tf.squeeze(prob, axis=cindex)
 
-    return {'logits': x, 'prob': prob}
+    # prob.add(Lamda())
+  
+
+    config['nms'] = 4
+    if config['nms']:
+        # prob_nms = tf.map_fn(fn = lambda p: box_nms(p, config['nms'],
+        #                                     min_prob=config['detection_threshold'],
+        #                                     keep_top_k=config['top_k']), elems = prob, fn_output_signature=tf.int32)
+        # prob_nms_layer = Lambda(lambda p: box_nms(p, config['nms'],
+        #                                 min_prob=config['detection_threshold'],
+        #                                 keep_top_k=config['top_k']))
+        prob_nms_layer = Lambda(lambda p: spatial_nms(p, config['nms'])) # simpler because couldn't get box_nms working                        
+        prob_nms = prob_nms_layer(prob)
+    pred = tf.cast(tf.greater_equal(prob_nms, config['detection_threshold']), dtype=tf.int32)
+
+    model = Model(inputs=inputs, outputs=[x, prob, pred])
+
+    return model
